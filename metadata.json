@@ -1,0 +1,5 @@
+{
+  "name": "VP.ai Virtual Photoshoot",
+  "description": "A high-performance, production-ready virtual try-on system with real-time preview, async job processing, and advanced AI garment mapping. Features include multi-garment try-on, brand catalogs, and analytics. Same UI /UX and Multi color theme on the fonts and text.",
+  "requestFramePermissions": ["camera"]
+}

@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "plan": { "type": "string", "enum": ["free", "pro", "enterprise"] },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "lastLogin": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "plan", "status"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "A collection of models and poses.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "ownerId", "createdAt"]
+    },
+    "Model": {
+      "title": "Model",
+      "description": "A generated model image.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "project_id": { "type": "string" },
+        "image_url": { "type": "string" },
+        "prompt": { "type": "string" },
+        "gender": { "type": "string" },
+        "metadata": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "project_id", "image_url", "createdAt"]
+    },
+    "Pose": {
+      "title": "Pose",
+      "description": "A generated pose for a model.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "model_id": { "type": "string" },
+        "image_url": { "type": "string" },
+        "pose_type": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "model_id", "image_url", "createdAt"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "A generated video.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sourceImage": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "prompt": { "type": "string" },
+        "mode": { "type": "string" },
+        "category": { "type": "string" },
+        "settings": { "type": "object" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sourceImage", "videoUrl", "ownerId", "createdAt"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "An invitation to join the platform.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "status": { "type": "string", "enum": ["pending", "accepted"] },
+        "invitedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "User projects"
+    },
+    "/models/{modelId}": {
+      "schema": "Model",
+      "description": "Generated models"
+    },
+    "/poses/{poseId}": {
+      "schema": "Pose",
+      "description": "Generated poses"
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Generated videos"
+    },
+    "/invitations/{invitationId}": {
+      "schema": "Invitation",
+      "description": "Platform invitations"
+    }
+  }
+}
