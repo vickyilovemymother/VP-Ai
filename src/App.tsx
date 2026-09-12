@@ -552,55 +552,196 @@ const BlockedScreen = ({ onLogout }: { onLogout: () => void }) => (
   </div>
 );
 
+const COUNTRY_CODES = [
+  { code: '+1', country: 'US / Canada' },
+  { code: '+91', country: 'India' },
+  { code: '+44', country: 'UK' },
+  { code: '+61', country: 'Australia' },
+  { code: '+971', country: 'UAE' },
+  { code: '+49', country: 'Germany' },
+  { code: '+33', country: 'France' },
+  { code: '+81', country: 'Japan' },
+  { code: '+65', country: 'Singapore' },
+  { code: '+86', country: 'China' },
+  { code: '+966', country: 'Saudi Arabia' },
+];
+
+const parseAuthError = (err: any): string => {
+  const code = err?.code || '';
+  const msg = err?.message || String(err);
+
+  if (code === 'auth/invalid-phone-number') {
+    return 'Invalid phone number format. Please ensure you include your country code (e.g., +1 415 555 2671).';
+  }
+  if (code === 'auth/missing-phone-number') {
+    return 'Please enter a valid phone number.';
+  }
+  if (code === 'auth/invalid-verification-code') {
+    return 'The 6-digit OTP code you entered is incorrect. Please check your SMS and try again.';
+  }
+  if (code === 'auth/code-expired') {
+    return 'The OTP code has expired. Please click "Resend OTP" to receive a new code.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Too many OTP requests from this device. Please wait a few minutes before trying again.';
+  }
+  if (code === 'auth/captcha-check-failed') {
+    return 'reCAPTCHA verification failed. Please try sending OTP again.';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'Phone Authentication is not enabled in your Firebase Console (Authentication > Sign-in method > Phone).';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return 'This domain (vp-ai.vickylive.com) is not listed in Firebase Console > Authentication > Settings > Authorized domains.';
+  }
+  return msg || 'An authentication error occurred. Please try again.';
+};
+
 const LoginScreen = ({ onLogin }: { onLogin: (p: 'google' | 'apple' | 'email' | 'phone', data?: any) => void }) => {
   const [mode, setMode] = useState<'social' | 'email' | 'phone'>('social');
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phone, setPhone] = useState('');
+  
+  // Phone Auth State
+  const [countryCode, setCountryCode] = useState('+1');
+  const [phoneInput, setPhoneInput] = useState('');
+  const [formattedPhone, setFormattedPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [resendTimer, setResendTimer] = useState(0);
 
-  const setupRecaptcha = () => {
-    if (!(window as any).recaptchaVerifier) {
-      (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'invisible'
-      });
+  // Timer effect for OTP resend cooldown
+  useEffect(() => {
+    let interval: any = null;
+    if (resendTimer > 0) {
+      interval = setInterval(() => {
+        setResendTimer((prev) => prev - 1);
+      }, 1000);
     }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [resendTimer]);
+
+  const initRecaptchaVerifier = () => {
+    if ((window as any).recaptchaVerifier) {
+      try {
+        (window as any).recaptchaVerifier.clear();
+      } catch (e) {
+        console.warn("Error clearing existing RecaptchaVerifier:", e);
+      }
+      (window as any).recaptchaVerifier = null;
+    }
+
+    const container = document.getElementById('recaptcha-container');
+    if (!container) {
+      throw new Error("reCAPTCHA container element missing in DOM");
+    }
+
+    const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+      size: 'invisible',
+      callback: () => {
+        // Captcha solved successfully
+      },
+      'expired-callback': () => {
+        console.warn("reCAPTCHA check expired");
+        setErrorMsg("reCAPTCHA expired. Please try sending OTP again.");
+      }
+    });
+
+    (window as any).recaptchaVerifier = verifier;
+    return verifier;
   };
 
-  const handleSendOtp = async () => {
-    if (!phone) return;
+  const getE164PhoneNumber = (): string | null => {
+    let cleaned = phoneInput.trim().replace(/[\s\-\(\)]/g, '');
+    if (!cleaned) return null;
+
+    if (cleaned.startsWith('+')) {
+      return cleaned;
+    }
+
+    cleaned = cleaned.replace(/^0+/, '');
+    return `${countryCode}${cleaned}`;
+  };
+
+  const handleSendOtp = async (isResend = false) => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const fullPhone = getE164PhoneNumber();
+    if (!fullPhone) {
+      setErrorMsg("Please enter a valid mobile phone number.");
+      return;
+    }
+
+    // Validate E.164 regex format (+ followed by 7 to 15 digits)
+    const e164Regex = /^\+[1-9]\d{6,14}$/;
+    if (!e164Regex.test(fullPhone)) {
+      setErrorMsg(`Invalid phone number format (${fullPhone}). Include your country code and digits.`);
+      return;
+    }
+
     setAuthLoading(true);
     try {
-      setupRecaptcha();
-      const appVerifier = (window as any).recaptchaVerifier;
-      const confirmation = await signInWithPhoneNumber(auth, phone, appVerifier);
+      const appVerifier = initRecaptchaVerifier();
+      if (!appVerifier) {
+        throw new Error("Unable to initialize reCAPTCHA verifier.");
+      }
+
+      const confirmation = await signInWithPhoneNumber(auth, fullPhone, appVerifier);
       setConfirmationResult(confirmation);
-      alert("OTP sent to your mobile number.");
+      setFormattedPhone(fullPhone);
+      setResendTimer(60); // 60s cooldown
+      setSuccessMsg(isResend ? `OTP resent to ${fullPhone}!` : `OTP sent successfully to ${fullPhone}!`);
     } catch (err: any) {
-      console.error("OTP failed:", err);
-      alert(err.message);
+      console.error("OTP send error:", err);
+      setErrorMsg(parseAuthError(err));
     } finally {
       setAuthLoading(false);
     }
   };
 
   const handleVerifyOtp = async () => {
-    if (!otp || !confirmationResult) return;
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const cleanedOtp = otp.trim();
+    if (!cleanedOtp || cleanedOtp.length < 6) {
+      setErrorMsg("Please enter the complete 6-digit OTP code.");
+      return;
+    }
+
+    if (!confirmationResult) {
+      setErrorMsg("Session expired. Please request a new OTP.");
+      return;
+    }
+
     setAuthLoading(true);
     try {
-      const result = await confirmationResult.confirm(otp);
+      const result = await confirmationResult.confirm(cleanedOtp);
       if (result.user) {
+        setSuccessMsg("Phone verification successful!");
         onLogin('phone', { user: result.user });
       }
     } catch (err: any) {
-      console.error("Verification failed:", err);
-      alert(err.message);
+      console.error("OTP verification error:", err);
+      setErrorMsg(parseAuthError(err));
     } finally {
       setAuthLoading(false);
     }
+  };
+
+  const handleResetPhoneState = () => {
+    setConfirmationResult(null);
+    setOtp('');
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setResendTimer(0);
   };
 
   return (
@@ -695,55 +836,124 @@ const LoginScreen = ({ onLogin }: { onLogin: (p: 'google' | 'apple' | 'email' | 
           </div>
         ) : (
           <div className="ai-card p-8 space-y-6">
-            <h3 className="text-2xl font-bold text-white text-center">Mobile Login</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                <Smartphone className="text-brand-accent" size={24} /> Mobile OTP Login
+              </h3>
+            </div>
+
+            {/* Always mounted container for reCAPTCHA widget */}
+            <div id="recaptcha-container"></div>
+
+            {errorMsg && (
+              <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs flex items-start justify-between gap-2">
+                <span>{errorMsg}</span>
+                <button onClick={() => setErrorMsg(null)} className="text-red-400/60 hover:text-red-400">
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
+            {successMsg && (
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs flex items-start justify-between gap-2">
+                <span>{successMsg}</span>
+                <button onClick={() => setSuccessMsg(null)} className="text-emerald-400/60 hover:text-emerald-400">
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
             <div className="space-y-4">
               {!confirmationResult ? (
                 <>
                   <div className="space-y-2">
-                    <label className="col-header">Phone Number</label>
-                    <input 
-                      type="tel" 
-                      value={phone} 
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-brand-accent/50"
-                      placeholder="+1234567890"
-                    />
+                    <label className="col-header">Mobile Phone Number</label>
+                    <div className="flex gap-2">
+                      <select 
+                        value={countryCode}
+                        onChange={(e) => setCountryCode(e.target.value)}
+                        className="bg-white/5 border border-white/10 rounded-xl px-3 py-3 text-sm text-white focus:outline-none focus:border-brand-accent/50 appearance-none cursor-pointer"
+                      >
+                        {COUNTRY_CODES.map((item) => (
+                          <option key={item.code} value={item.code} className="bg-zinc-900 text-white">
+                            {item.code} ({item.country})
+                          </option>
+                        ))}
+                      </select>
+                      <input 
+                        type="tel" 
+                        value={phoneInput} 
+                        onChange={(e) => setPhoneInput(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-brand-accent/50 placeholder:text-white/20"
+                        placeholder="9876543210 or +1 415 555 2671"
+                      />
+                    </div>
+                    <p className="text-[11px] text-white/40 italic">
+                      Format: E.164 format with country code (e.g., +1 415 555 2671 or select code above).
+                    </p>
                   </div>
-                  <div id="recaptcha-container"></div>
+
                   <Button 
-                    onClick={handleSendOtp}
-                    className="w-full h-12"
-                    disabled={authLoading || !phone}
+                    onClick={() => handleSendOtp(false)}
+                    className="w-full h-12 gap-2"
+                    disabled={authLoading || !phoneInput.trim()}
                   >
-                    {authLoading ? <Loader2 className="animate-spin" /> : 'Send OTP'}
+                    {authLoading ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+                    Send Verification Code
                   </Button>
                 </>
               ) : (
                 <>
+                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between text-xs">
+                    <div>
+                      <span className="text-white/40 block text-[10px] uppercase font-bold tracking-widest">Verification Sent To</span>
+                      <span className="text-brand-accent font-bold font-mono text-sm">{formattedPhone}</span>
+                    </div>
+                    <button 
+                      onClick={handleResetPhoneState}
+                      className="text-xs text-white/50 hover:text-white underline transition-colors"
+                    >
+                      Change Number
+                    </button>
+                  </div>
+
                   <div className="space-y-2">
-                    <label className="col-header">Enter OTP</label>
+                    <label className="col-header">Enter 6-Digit OTP</label>
                     <input 
                       type="text" 
                       value={otp} 
-                      onChange={(e) => setOtp(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-brand-accent/50 text-center tracking-[1em] font-bold"
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none focus:border-brand-accent/50 text-center tracking-[0.8em] font-mono text-xl font-bold"
                       placeholder="000000"
                       maxLength={6}
                     />
                   </div>
+
                   <Button 
                     onClick={handleVerifyOtp}
-                    className="w-full h-12"
-                    disabled={authLoading || !otp}
+                    className="w-full h-12 gap-2"
+                    disabled={authLoading || otp.length < 6}
                   >
-                    {authLoading ? <Loader2 className="animate-spin" /> : 'Verify & Sign In'}
+                    {authLoading ? <Loader2 className="animate-spin" size={18} /> : <Shield size={18} />}
+                    Verify & Sign In
                   </Button>
-                  <button 
-                    onClick={() => setConfirmationResult(null)}
-                    className="w-full text-xs text-white/40 hover:text-white transition-colors"
-                  >
-                    Change phone number
-                  </button>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <button 
+                      onClick={() => handleSendOtp(true)}
+                      disabled={authLoading || resendTimer > 0}
+                      className="text-xs text-brand-accent hover:underline disabled:opacity-40 disabled:no-underline transition-colors"
+                    >
+                      {resendTimer > 0 ? `Resend OTP in ${resendTimer}s` : 'Resend OTP'}
+                    </button>
+
+                    <button 
+                      onClick={handleResetPhoneState}
+                      className="text-xs text-white/40 hover:text-white transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -752,19 +962,19 @@ const LoginScreen = ({ onLogin }: { onLogin: (p: 'google' | 'apple' | 'email' | 
 
         <div className="flex items-center justify-center gap-4">
           <button 
-            onClick={() => setMode('social')}
+            onClick={() => { setMode('social'); setErrorMsg(null); setSuccessMsg(null); }}
             className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${mode === 'social' ? 'bg-brand-accent text-black' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}
           >
             Social
           </button>
           <button 
-            onClick={() => setMode('email')}
+            onClick={() => { setMode('email'); setErrorMsg(null); setSuccessMsg(null); }}
             className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${mode === 'email' ? 'bg-brand-accent text-black' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}
           >
             Email
           </button>
           <button 
-            onClick={() => setMode('phone')}
+            onClick={() => { setMode('phone'); setErrorMsg(null); setSuccessMsg(null); }}
             className={`px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${mode === 'phone' ? 'bg-brand-accent text-black' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}
           >
             Mobile

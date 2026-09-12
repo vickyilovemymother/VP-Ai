@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "bridge": "cd Key && node server.js",
+    "tunnel": ".\\Key\\cloudflared.exe tunnel --url http://localhost:3001"
   },
   "dependencies": {
     "@google/genai": "^1.44.0",
